@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.InvestmentTracker" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/background_dark</item>
+        <item name="android:statusBarColor">@color/background_dark</item>
+        <item name="android:navigationBarColor">@color/background_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
 
-    <style name="Theme.InvestmentTracker" parent="android:Theme.Material.Light.NoActionBar" />
+        <!-- Hide Android 12+ System Splash Screen icon -->
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="s">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="s">@color/background_dark</item>
+    </style>
 </resources>

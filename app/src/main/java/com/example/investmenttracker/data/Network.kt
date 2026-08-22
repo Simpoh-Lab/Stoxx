@@ -13,6 +13,7 @@ import org.jsoup.parser.Parser
  * Mock data fetchers for stocks and news.
  */
 
+// Fetches recent stock-related news articles from Google News RSS for the given symbols.
 suspend fun fetchPortfolioNews(symbols: List<String>): List<LiveNewsItem> = withContext(Dispatchers.IO) {
     if (symbols.isEmpty()) return@withContext emptyList()
     
@@ -23,8 +24,10 @@ suspend fun fetchPortfolioNews(symbols: List<String>): List<LiveNewsItem> = with
     
     symbols.forEach { symbol ->
         val cleanSymbol = symbol.uppercase().trim()
-        // Google News RSS query for SGX stocks
-        val rssUrl = "https://news.google.com/rss/search?q=SGX:${cleanSymbol}+stock&hl=en-SG&gl=SG&ceid=SG:en"
+        // Broadened query to include specific high-quality sources via site: operator
+        val query = "SGX:$cleanSymbol stock (site:simplywall.st OR site:finance.yahoo.com OR site:reuters.com OR site:bloomberg.com OR site:businesstimes.com.sg)"
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val rssUrl = "https://news.google.com/rss/search?q=$encodedQuery&hl=en-SG&gl=SG&ceid=SG:en"
         
         try {
             val doc = Jsoup.connect(rssUrl)
@@ -47,6 +50,9 @@ suspend fun fetchPortfolioNews(symbols: List<String>): List<LiveNewsItem> = with
                 
                 // Only add if within the last 5 days
                 if (title.isNotBlank() && link.isNotBlank() && (now - timestamp) <= fiveDaysInMillis) {
+                    // Filter out "Market Updates" source
+                    if (source.equals("Market Updates", ignoreCase = true)) return@forEach
+
                     // Clean up title (Google News often adds the source name at the end with a hyphen)
                     val cleanTitle = if (title.contains(" - ")) title.substringBeforeLast(" - ") else title
                     
@@ -66,25 +72,10 @@ suspend fun fetchPortfolioNews(symbols: List<String>): List<LiveNewsItem> = with
         }
     }
     
-    // If empty, return a slightly more realistic fallback
-    if (allNews.isEmpty()) {
-        val now = System.currentTimeMillis()
-        return@withContext symbols.flatMap { symbol ->
-            listOf(
-                LiveNewsItem(
-                    title = "Latest market trends for $symbol",
-                    source = "Market Updates",
-                    link = "https://www.google.com/finance/quote/$symbol:SGX",
-                    stockSymbol = symbol,
-                    timestamp = now - 3600000L
-                )
-            )
-        }.sortedByDescending { it.timestamp }
-    }
-    
     return@withContext allNews.sortedByDescending { it.timestamp }
 }
 
+// Fetches real-time stock data and 5-day price history from Yahoo Finance.
 suspend fun fetchSGXStockDynamic(symbol: String): StockItem? = withContext(Dispatchers.IO) {
     val cleanSymbol = symbol.uppercase().trim()
     val ticker = if (cleanSymbol.endsWith(".SI")) cleanSymbol else "$cleanSymbol.SI"
@@ -204,6 +195,7 @@ suspend fun fetchSGXStockDynamic(symbol: String): StockItem? = withContext(Dispa
 }
 
 // Helper for consistent simulated data if API chart points fail
+// Generates simulated chart data points if the API fails to provide chart data.
 private fun generateFallbackChart(isGain: Boolean, symbol: String): List<Float> {
     val seededRandom = Random(symbol.hashCode().toLong())
     val points = mutableListOf<Float>()

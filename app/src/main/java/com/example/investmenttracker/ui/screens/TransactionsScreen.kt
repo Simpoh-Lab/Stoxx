@@ -1,24 +1,20 @@
 package com.example.investmenttracker.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,203 +22,614 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.investmenttracker.CurrentScreen
+import com.example.investmenttracker.R
 import com.example.investmenttracker.UserPreferences
+import com.example.investmenttracker.data.StockItem
 import com.example.investmenttracker.data.TransactionItem
+import com.example.investmenttracker.data.fetchSGXStockDynamic
+import com.example.investmenttracker.ui.components.HeaderSection
+import com.example.investmenttracker.ui.components.SparklineChart
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+// Displays a history of investment transactions and provides tools for adding and filtering entries.
 @Composable
 fun TransactionsScreen(
     onBackToHome: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToBrokerage: () -> Unit
+    onNavigateToBrokerage: () -> Unit,
+    stocks: List<StockItem>
 ) {
     val context = LocalContext.current
     var showAddDialog by remember { mutableStateOf(false) }
+    var showFilterDialog by remember { mutableStateOf(false) }
+    var isMenuOpen by remember { mutableStateOf(false) }
     
-    // Load persisted transactions
-    val transactions = remember { 
+    val transactionsMaster = remember { 
         mutableStateListOf<TransactionItem>().apply {
             addAll(UserPreferences.loadTransactions(context))
         }
     }
 
-    // Default mock if empty
-    LaunchedEffect(Unit) {
-        if (transactions.isEmpty()) {
-            val initial = listOf(
-                TransactionItem(
-                    id = UUID.randomUUID().toString(),
-                    date = "19/8/2026",
-                    description = "Bought 100 unit D05 using Webull",
-                    amount = "1014.08",
-                    isDebit = true,
-                    brokerage = "Webull",
-                    isAuto = false,
-                    units = "100",
-                    action = "Bought",
-                    pricePerUnit = "10.12",
-                    fees = "1.91",
-                    pnl = "12.34",
-                    pnlPercent = "1.23"
-                )
-            )
-            transactions.addAll(initial)
-            UserPreferences.saveTransactions(context, transactions)
+    // Filter States
+    var selectedBroker by remember { mutableStateOf("All") }
+    var startDate by remember { mutableStateOf<String?>(null) }
+    var endDate by remember { mutableStateOf<String?>(null) }
+
+    val filteredTransactions = remember(selectedBroker, startDate, endDate) {
+        derivedStateOf {
+            transactionsMaster.filter { item ->
+                val matchesBroker = if (selectedBroker == "All") true else item.brokerage.equals(selectedBroker, ignoreCase = true)
+                
+                val matchesDate = try {
+                    val itemDate = parseDate(item.date)
+                    val start = startDate?.let { parseDate(it) }
+                    val end = endDate?.let { parseDate(it) }
+                    
+                    (start == null || !itemDate.before(start)) && (end == null || !itemDate.after(end))
+                } catch (e: Exception) { true }
+                
+                matchesBroker && matchesDate
+            }
         }
-    }
+    }.value
+
+    val username = remember { UserPreferences.getUsername(context) }
+    var transactionToDelete by remember { mutableStateOf<TransactionItem?>(null) }
+    var expandedTransactionId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
-        containerColor = Color(0xFF1E1E2E),
-        bottomBar = {
-            AppBottomNavigation(
-                onHomeClick = onBackToHome,
-                onGraphClick = { /* Current */ },
-                onSettingsClick = onNavigateToSettings,
-                onBrokerageClick = onNavigateToBrokerage,
-                highlightIndex = 1
-            )
-        }
+        containerColor = Color(0xFF1E1E2E)
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
-            // Header
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp),
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D))
-            ) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "Transactions",
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-            }
+            // 1. Header (10%)
+            HeaderSection(
+                userName = username,
+                isMenuOpen = isMenuOpen,
+                currentScreen = CurrentScreen.TRANSACTIONS,
+                onMenuToggle = { isMenuOpen = !isMenuOpen },
+                onNavigate = { screen ->
+                    isMenuOpen = false
+                    when (screen) {
+                        CurrentScreen.HOME -> onBackToHome()
+                        CurrentScreen.SETTINGS -> onNavigateToSettings()
+                        else -> {}
+                    }
+                },
+                customTitle = "Transactions",
+                customSubtitle = "View Order History here!",
+                showProfile = false
+            )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Subheader
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Brokerage / Manual",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            // 2. Control Buttons (5%)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val buttonHeight = 36.dp
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Brokers Pill
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
-                            .background(Color(0xFF2B2B3D), shape = RoundedCornerShape(8.dp))
-                            .border(1.dp, Color.Gray.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .clickable { showAddDialog = true },
+                            .height(buttonHeight)
+                            .background(Color(0xFF2B2B3D), RoundedCornerShape(16.dp))
+                            .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                            .clickable { onNavigateToBrokerage() }
+                            .padding(horizontal = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add", tint = Color.White, modifier = Modifier.size(20.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Brokers", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(Color(0xFF2B2B3D), shape = RoundedCornerShape(8.dp))
-                            .border(1.dp, Color.Gray.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.FilterList, contentDescription = "Filter", tint = Color.White, modifier = Modifier.size(20.dp))
+                        // Add Button
+                        Box(
+                            modifier = Modifier
+                                .size(buttonHeight)
+                                .background(Color(0xFF2B2B3D), RoundedCornerShape(8.dp))
+                                .border(
+                                    1.dp,
+                                    Color.Gray.copy(alpha = 0.3f),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { showAddDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                        // Filter Button
+                        Box(
+                            modifier = Modifier
+                                .size(buttonHeight)
+                                .background(Color(0xFF2B2B3D), RoundedCornerShape(8.dp))
+                                .border(
+                                    1.dp,
+                                    Color.Gray.copy(alpha = 0.3f),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { showFilterDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.FilterList, contentDescription = "Filter", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
                     }
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.3f))
-
-            // List
-            LazyColumn(
-                modifier = Modifier.weight(1f)
-            ) {
-                itemsIndexed(transactions) { index, item ->
-                    TransactionRow(
-                        item = item,
-                        showBackground = index % 2 != 0
-                    )
-                    HorizontalDivider(color = Color.Gray.copy(alpha = 0.1f))
                 }
                 
-                item {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        HorizontalDivider(modifier = Modifier.width(60.dp), color = Color.Gray.copy(alpha = 0.5f))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Up-To-Date",
-                            color = Color.Gray,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Thin line across the screen
+                HorizontalDivider(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    thickness = 0.5.dp,
+                    color = Color.Gray.copy(alpha = 0.3f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 3. Transactions List (75%)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    itemsIndexed(filteredTransactions) { index, item ->
+                        TransactionCard(
+                            item = item,
+                            initialStockData = stocks.find { it.symbol.uppercase() == item.symbol.uppercase() },
+                            isExpanded = expandedTransactionId == item.id,
+                            onExpandToggle = {
+                                expandedTransactionId = if (expandedTransactionId == item.id) null else item.id
+                            },
+                            onLongClick = {
+                                if (!item.isAuto && item.brokerage == "Manual") {
+                                    transactionToDelete = item
+                                }
+                            }
                         )
                     }
                 }
             }
+
+            // 4. NO UI ZONE (10%)
+            Spacer(modifier = Modifier.height(80.dp))
         }
+    }
+
+    if (transactionToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { transactionToDelete = null },
+            containerColor = Color(0xFF2B2B3D),
+            title = { Text("Delete Transaction", color = Color.White) },
+            text = { Text("Are you sure you want to delete this manual transaction?", color = Color.LightGray) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        transactionToDelete?.let {
+                            transactionsMaster.remove(it)
+                            UserPreferences.saveTransactions(context, transactionsMaster)
+                        }
+                        transactionToDelete = null
+                    }
+                ) {
+                    Text("Delete", color = Color(0xFFE57373))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { transactionToDelete = null }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            }
+        )
+    }
+
+    if (showFilterDialog) {
+        FilterTransactionsDialog(
+            currentBroker = selectedBroker,
+            currentStart = startDate,
+            currentEnd = endDate,
+            onDismiss = { showFilterDialog = false },
+            onApply = { broker, start, end ->
+                selectedBroker = broker
+                startDate = start
+                endDate = end
+                showFilterDialog = false
+            }
+        )
     }
 
     if (showAddDialog) {
         NewTransactionDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { date, action, brokerage, price, units ->
-                val description = if (action == "Dividend") {
-                    "Dividend for D05 received at $brokerage"
-                } else {
-                    "$action $units unit D05 using $brokerage"
-                }
+            onConfirm = { date, time, symbol, units, price, fee ->
                 val newItem = TransactionItem(
                     id = UUID.randomUUID().toString(),
                     date = date,
-                    description = description,
-                    amount = price,
-                    isDebit = action == "Bought",
-                    brokerage = brokerage,
+                    time = time,
+                    symbol = symbol,
+                    description = "Bought $units units $symbol @ \$$price",
+                    amount = String.format(Locale.US, "%.2f", (units.toDoubleOrNull() ?: 0.0) * (price.toDoubleOrNull() ?: 0.0) + (fee.toDoubleOrNull() ?: 0.0)),
+                    isDebit = true,
+                    brokerage = "Manual",
                     isAuto = false,
                     units = units,
-                    action = action,
-                    pricePerUnit = try { 
-                        val p = price.toDoubleOrNull() ?: 0.0
-                        val u = units.toDoubleOrNull() ?: 1.0
-                        if (u != 0.0) String.format(Locale.US, "%.2f", p / u) else "0.00"
-                    } catch (e: Exception) { "0.00" },
-                    fees = "0.00",
-                    pnl = "0.00",
+                    action = "Bought",
+                    pricePerUnit = price,
+                    fees = fee,
+                    pnl = "+0.00",
                     pnlPercent = "0.00"
                 )
-                transactions.add(0, newItem)
-                UserPreferences.saveTransactions(context, transactions)
+                transactionsMaster.add(0, newItem)
+                UserPreferences.saveTransactions(context, transactionsMaster)
                 showAddDialog = false
             }
         )
+    }
+}
+
+// Helper to parse dates with multiple possible formats (manual vs csv)
+private fun parseDate(dateStr: String): Date {
+    val formats = listOf("yyyy/MM/dd", "dd/MM/yyyy")
+    for (format in formats) {
+        try {
+            return SimpleDateFormat(format, Locale.US).parse(dateStr)!!
+        } catch (e: Exception) {}
+    }
+    return Date(0) // Fallback
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FilterTransactionsDialog(
+    currentBroker: String,
+    currentStart: String?,
+    currentEnd: String?,
+    onDismiss: () -> Unit,
+    onApply: (String, String?, String?) -> Unit
+) {
+    var broker by remember { mutableStateOf(currentBroker) }
+    var startDate by remember { mutableStateOf(currentStart) }
+    var endDate by remember { mutableStateOf(currentEnd) }
+    
+    var brokerExpanded by remember { mutableStateOf(false) }
+    
+    // Date Picker state management
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
+    
+    if (showStartPicker || showEndPicker) {
+        val state = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showStartPicker = false; showEndPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    val date = state.selectedDateMillis?.let {
+                        SimpleDateFormat("yyyy/MM/dd", Locale.US).format(Date(it))
+                    }
+                    if (showStartPicker) startDate = date else endDate = date
+                    showStartPicker = false
+                    showEndPicker = false
+                }) { Text("OK") }
+            }
+        ) {
+            DatePicker(state = state)
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp), 
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Filter Orders", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                
+                HorizontalDivider(thickness = 0.5.dp, color = Color.Gray.copy(alpha = 0.3f))
+
+                // Broker Filter
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Source", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ExposedDropdownMenuBox(
+                        expanded = brokerExpanded,
+                        onExpandedChange = { brokerExpanded = it }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .background(Color(0xFF1E1E2E), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(broker, color = Color.White, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.weight(1f))
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.Gray)
+                            }
+                        }
+                        ExposedDropdownMenu(
+                            expanded = brokerExpanded,
+                            onDismissRequest = { brokerExpanded = false }
+                        ) {
+                            listOf("All", "Webull SG", "Moomoo", "Syfe", "Coinbase", "Manual").forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = { broker = option; brokerExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Date Filter
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("From", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .background(Color(0xFF1E1E2E), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .clickable { showStartPicker = true }
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(startDate ?: "YYYY/MM/DD", color = if (startDate != null) Color.White else Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("To", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .background(Color(0xFF1E1E2E), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .clickable { showEndPicker = true }
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(endDate ?: "YYYY/MM/DD", color = if (endDate != null) Color.White else Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(
+                        onClick = { broker = "All"; startDate = null; endDate = null },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Reset", color = Color.Gray)
+                    }
+                    Button(
+                        onClick = { onApply(broker, startDate, endDate) },
+                        modifier = Modifier.weight(1.5f).height(44.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Apply Filter", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TransactionCard(
+    item: TransactionItem,
+    initialStockData: StockItem? = null,
+    isExpanded: Boolean,
+    onExpandToggle: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val context = LocalContext.current
+    
+    // Live stock data for this specific transaction's symbol
+    var liveStockData by remember { mutableStateOf<StockItem?>(initialStockData) }
+
+    // Fetch latest stock data if not present to get previousClose and chart
+    LaunchedEffect(item.symbol) {
+        if (liveStockData == null && item.symbol.isNotEmpty()) {
+            try {
+                val fetched = fetchSGXStockDynamic(item.symbol)
+                if (fetched != null) {
+                    liveStockData = fetched
+                }
+            } catch (e: Exception) {
+                // Ignore fetch errors
+            }
+        }
+    }
+
+    // Calculate P/L relative to current live data
+    val calculatedPnlData = remember(item, liveStockData) {
+        val stock = liveStockData
+        if (stock != null && item.action == "Bought") {
+            val prevCloseNum = stock.previousClose.toDoubleOrNull() ?: 0.0
+            val unitsNum = item.units.toDoubleOrNull() ?: 0.0
+            val totalCostNum = item.amount.toDoubleOrNull() ?: 0.0
+            
+            // P/L relative to the latest market previous close
+            val currentVal = prevCloseNum * unitsNum
+            val pnl = currentVal - totalCostNum
+            val pnlPercent = if (totalCostNum != 0.0) (pnl / totalCostNum) * 100.0 else 0.0
+            
+            val sign = if (pnl >= 0) "+" else "-"
+            Pair(
+                String.format(Locale.US, "%s$%.2f", sign, kotlin.math.abs(pnl)),
+                String.format(Locale.US, "%s%.2f%%", sign, kotlin.math.abs(pnlPercent))
+            )
+        } else {
+            val pnl = item.pnl
+            val pnlPercent = item.pnlPercent
+            // Ensure sign is present for consistency
+            val sign = if (pnl.startsWith("+") || pnl.startsWith("-")) "" else "+"
+            Pair("$sign$pnl", "$sign$pnlPercent%")
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onExpandToggle,
+                onLongClick = onLongClick
+            ),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D)),
+        border = if (isExpanded) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.5f)) else null
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Summary Row
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Logo Circle
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF1E1E2E)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val isManual = !item.brokerage.contains("Webull", ignoreCase = true) &&
+                                   !item.brokerage.contains("Moomoo", ignoreCase = true) &&
+                                   !item.brokerage.contains("Syfe", ignoreCase = true) &&
+                                   !item.brokerage.contains("Coinbase", ignoreCase = true)
+
+                    val brokerLogoRes = remember(item.brokerage) {
+                        when {
+                            item.brokerage.contains("Webull", ignoreCase = true) -> R.drawable.ic_broker_webull
+                            item.brokerage.contains("Moomoo", ignoreCase = true) -> R.drawable.ic_broker_moomoo
+                            item.brokerage.contains("Syfe", ignoreCase = true) -> R.drawable.ic_broker_syfe
+                            item.brokerage.contains("Coinbase", ignoreCase = true) -> R.drawable.ic_broker_coinbase
+                            else -> R.drawable.ic_application_submark
+                        }
+                    }
+                    Image(
+                        painter = painterResource(id = brokerLogoRes),
+                        contentDescription = item.brokerage,
+                        modifier = Modifier
+                            .size(if (isManual) 24.dp else 20.dp)
+                            .clip(CircleShape)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Text(
+                    text = "${item.date}  |  ${item.description} in ${item.brokerage}",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1
+                )
+            }
+
+            // Expanded Details
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        // Left: Info Grid
+                        Column(modifier = Modifier.weight(1f)) {
+                            DetailText("Broker", item.brokerage)
+                            DetailText("Date", item.date)
+                            DetailText("Time", item.time.ifEmpty { "Unknown" })
+                            DetailText("Unit", item.units)
+                        }
+
+                        // Middle: Financials
+                        Column(modifier = Modifier.weight(1f)) {
+                            DetailText("Price", "$${item.pricePerUnit}")
+                            DetailText("Fee", "$${item.fees}")
+                            DetailText("Total", "$${item.amount}")
+                            DetailText(
+                                "P/L", 
+                                "${calculatedPnlData.first} (${calculatedPnlData.second})", 
+                                color = if (calculatedPnlData.first.startsWith("+")) Color(0xFF4CAF50) else Color(0xFFE57373)
+                            )
+                        }
+
+                        // Right: Graph
+                        Box(
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .height(100.dp)
+                                .background(Color(0xFF1E1E2E), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            val chartData = liveStockData?.chartData ?: listOf(10f, 15f, 12f, 18f, 16f, 22f)
+                            SparklineChart(
+                                data = chartData,
+                                lineColor = if (liveStockData?.isGain == false) Color(0xFFE57373) else Color(0xFF4CAF50),
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailText(label: String, value: String, color: Color = Color.White) {
+    Row(modifier = Modifier.padding(vertical = 2.dp)) {
+        Text("$label: ", color = Color.Gray, fontSize = 11.sp)
+        Text(value, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -230,18 +637,80 @@ fun TransactionsScreen(
 @Composable
 fun NewTransactionDialog(
     onDismiss: () -> Unit,
-    onConfirm: (String, String, String, String, String) -> Unit
+    onConfirm: (String, String, String, String, String, String) -> Unit
 ) {
-    var date by remember { mutableStateOf(SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())) }
-    var action by remember { mutableStateOf("Bought") }
-    var brokerage by remember { mutableStateOf("Webull") }
-    var price by remember { mutableStateOf("12.34") }
-    var units by remember { mutableStateOf("100") }
+    val context = LocalContext.current
     
-    var showDatePicker by remember { mutableStateOf(false) }
-    var actionExpanded by remember { mutableStateOf(false) }
-    var brokerageExpanded by remember { mutableStateOf(false) }
+    var date by remember { mutableStateOf(SimpleDateFormat("yyyy/MM/dd", Locale.US).format(Date())) }
+    var time by remember { mutableStateOf(SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())) }
+    var symbol by remember { mutableStateOf("") }
+    var units by remember { mutableStateOf("1") }
+    var price by remember { mutableStateOf("1.00") }
+    var fee by remember { mutableStateOf("1.00") }
+    
+    var isCheckingSymbol by remember { mutableStateOf(false) }
+    var isSymbolValidRemote by remember { mutableStateOf<Boolean?>(null) } // null = unchecked, true = valid, false = invalid
 
+    // Validation Logic
+    val isDateValid = remember(date) {
+        try {
+            val selected = SimpleDateFormat("yyyy/MM/dd", Locale.US).parse(date)
+            val today = SimpleDateFormat("yyyy/MM/dd", Locale.US).parse(SimpleDateFormat("yyyy/MM/dd", Locale.US).format(Date()))
+            selected != null && today != null && !selected.after(today)
+        } catch (e: Exception) { false }
+    }
+
+    val isTimeValid = remember(date, time) {
+        if (!isDateValid) return@remember false
+        try {
+            val now = Date()
+            val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US)
+            val selectedFull = sdf.parse("$date $time")
+            selectedFull != null && !selectedFull.after(now)
+        } catch (e: Exception) { false }
+    }
+
+    val isSymbolFormatValid = remember(symbol) { 
+        symbol.matches("^[A-Z0-9]+\\.SI$".toRegex()) 
+    }
+    
+    val isUnitsValid = remember(units) { 
+        val u = units.toDoubleOrNull() ?: 0.0
+        u >= 1.0 
+    }
+    
+    val isPriceValid = remember(price) { 
+        val p = price.toDoubleOrNull() ?: 0.0
+        p >= 0.01
+    }
+    
+    val isFeeValid = remember(fee) { 
+        val f = fee.toDoubleOrNull() ?: 0.0
+        f >= 0.01
+    }
+    
+    // Live symbol validation
+    LaunchedEffect(symbol) {
+        if (isSymbolFormatValid) {
+            isCheckingSymbol = true
+            isSymbolValidRemote = null
+            try {
+                val stock = fetchSGXStockDynamic(symbol)
+                isSymbolValidRemote = (stock != null)
+            } catch (e: Exception) {
+                isSymbolValidRemote = false
+            } finally {
+                isCheckingSymbol = false
+            }
+        } else {
+            isSymbolValidRemote = null
+        }
+    }
+
+    val isFormValid = isDateValid && isTimeValid && isSymbolFormatValid && 
+                     (isSymbolValidRemote == true) && isUnitsValid && isPriceValid && isFeeValid
+
+    var showDatePicker by remember { mutableStateOf(false) }
     val datePickerState = rememberDatePickerState()
 
     if (showDatePicker) {
@@ -250,7 +719,7 @@ fun NewTransactionDialog(
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let {
-                        date = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(it))
+                        date = SimpleDateFormat("yyyy/MM/dd", Locale.US).format(Date(it))
                     }
                     showDatePicker = false
                 }) { Text("OK") }
@@ -267,215 +736,85 @@ fun NewTransactionDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp),
+                .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D))
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier.padding(16.dp), 
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "New Transaction",
-                    color = Color.White,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(
-                    text = "- Manual Input -",
-                    color = Color.Gray,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
+                Text("Transaction Slip", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                
+                HorizontalDivider(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    thickness = 0.5.dp,
+                    color = Color.Gray.copy(alpha = 0.3f)
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Date Field
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("Date", color = Color.White, fontSize = 20.sp, modifier = Modifier.width(100.dp))
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .background(Color(0xFF1E1E2E), RoundedCornerShape(4.dp))
-                            .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-                            .clickable { showDatePicker = true }
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(date, color = Color.White, fontSize = 15.sp)
-                            Spacer(modifier = Modifier.weight(1f))
-                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(18.dp))
-                        }
+                SlipInputRow(
+                    label = "Date", 
+                    value = date, 
+                    icon = Icons.Default.CalendarToday, 
+                    isValid = isDateValid,
+                    onClick = { showDatePicker = true }
+                )
+                
+                SlipInputRow(
+                    label = "Time", 
+                    value = time, 
+                    icon = Icons.Default.Schedule,
+                    isValid = isTimeValid
+                ) { time = it }
+                
+                // Symbol with format validation and remote check hint
+                Column {
+                    SlipInputRow(
+                        label = "Symbol", 
+                        value = symbol, 
+                        placeholder = "e.g. D05.SI",
+                        isValid = (isSymbolFormatValid && isSymbolValidRemote != false) || symbol.isEmpty(),
+                        icon = if (isCheckingSymbol) null else if (isSymbolValidRemote == true) Icons.Default.CheckCircle else null
+                    ) { 
+                        symbol = it.uppercase().trim() 
+                    }
+                    if (isCheckingSymbol) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().height(2.dp).padding(horizontal = 8.dp),
+                            color = Color(0xFF4CAF50),
+                            trackColor = Color.Transparent
+                        )
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(12.dp))
+                // Number Inputs with Steppers and validation
+                SlipNumberInputRow("Unit", units, increment = 1.0, isValid = isUnitsValid) { units = it }
+                SlipNumberInputRow("Price", price, increment = 0.01, prefix = "$", isValid = isPriceValid) { price = it }
+                SlipNumberInputRow("Fee", fee, increment = 0.01, prefix = "$", isValid = isFeeValid) { fee = it }
 
-                // Units Field
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("Units", color = Color.White, fontSize = 20.sp, modifier = Modifier.width(100.dp))
-                    TransactionNumberInputField(
-                        modifier = Modifier.weight(1f),
-                        value = units,
-                        onValueChange = { units = it },
-                        onIncrement = {
-                            val u = units.toIntOrNull() ?: 0
-                            units = (u + 1).toString()
-                        },
-                        onDecrement = {
-                            val u = units.toIntOrNull() ?: 0
-                            if (u > 0) units = (u - 1).toString()
-                        },
-                        keyboardType = KeyboardType.Number
-                    )
-                }
-                
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Action Dropdown
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("Action", color = Color.White, fontSize = 20.sp, modifier = Modifier.width(100.dp))
-                    ExposedDropdownMenuBox(
-                        expanded = actionExpanded,
-                        onExpandedChange = { actionExpanded = it },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .menuAnchor()
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .background(Color(0xFF1E1E2E), RoundedCornerShape(4.dp))
-                                .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(action, color = if (action == "Bought") Color(0xFFE57373) else Color(0xFF4CAF50), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.weight(1f))
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                        ExposedDropdownMenu(
-                            expanded = actionExpanded,
-                            onDismissRequest = { actionExpanded = false },
-                            modifier = Modifier.background(Color(0xFF2B2B3D))
-                        ) {
-                            listOf("Bought", "Sold", "Dividend").forEach { option ->
-                                DropdownMenuItem(
-                                    text = { Text(option, color = Color.White) },
-                                    onClick = {
-                                        action = option
-                                        actionExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Brokerage Dropdown
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("Brokerage", color = Color.White, fontSize = 20.sp, modifier = Modifier.width(100.dp))
-                    ExposedDropdownMenuBox(
-                        expanded = brokerageExpanded,
-                        onExpandedChange = { brokerageExpanded = it },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .menuAnchor()
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .background(Color(0xFF1E1E2E), RoundedCornerShape(4.dp))
-                                .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(brokerage, color = Color.White, fontSize = 15.sp)
-                                Spacer(modifier = Modifier.weight(1f))
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                        ExposedDropdownMenu(
-                            expanded = brokerageExpanded,
-                            onDismissRequest = { brokerageExpanded = false },
-                            modifier = Modifier.background(Color(0xFF2B2B3D))
-                        ) {
-                            listOf("Webull", "Moomoo", "Coinbase", "Syfe").forEach { option ->
-                                DropdownMenuItem(
-                                    text = { Text(option, color = Color.White) },
-                                    onClick = {
-                                        brokerage = option
-                                        brokerageExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Price Field
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.width(100.dp)) {
-                        Text("Price", color = Color.White, fontSize = 20.sp)
-                        Text("(including fee)", color = Color.Gray, fontSize = 10.sp)
-                    }
-                    TransactionNumberInputField(
-                        modifier = Modifier.weight(1f),
-                        value = price,
-                        onValueChange = { price = it },
-                        onIncrement = {
-                            val p = price.toDoubleOrNull() ?: 0.0
-                            price = String.format(Locale.US, "%.2f", p + 0.01)
-                        },
-                        onDecrement = {
-                            val p = price.toDoubleOrNull() ?: 0.0
-                            if (p > 0) price = String.format(Locale.US, "%.2f", Math.max(0.0, p - 0.01))
-                        },
-                        prefix = "$",
-                        keyboardType = KeyboardType.Decimal
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Horizontal Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Cancel Button
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp)
-                            .background(Color(0xFFE57373).copy(alpha = 0.2f), RoundedCornerShape(12.dp))
-                            .border(1.5.dp, Color(0xFFE57373), RoundedCornerShape(12.dp))
-                            .clickable { onDismiss() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Cancel", color = Color(0xFFE57373), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    // Confirm Button
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp)
-                            .background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(12.dp))
-                            .border(1.5.dp, Color(0xFF4CAF50), RoundedCornerShape(12.dp))
-                            .clickable { onConfirm(date, action, brokerage, price, units) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Confirm", color = Color(0xFF4CAF50), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Cancel", fontWeight = FontWeight.Bold) }
+                    
+                    Button(
+                        onClick = { if (isFormValid) onConfirm(date, time, symbol, units, price, fee) },
+                        enabled = isFormValid,
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF4CAF50),
+                            disabledContainerColor = Color(0xFF4CAF50).copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { 
+                        Text("Confirm", fontWeight = FontWeight.Bold, color = if (isFormValid) Color.White else Color.Gray) 
                     }
                 }
             }
@@ -484,130 +823,123 @@ fun NewTransactionDialog(
 }
 
 @Composable
-fun TransactionNumberInputField(
-    modifier: Modifier = Modifier,
+fun SlipNumberInputRow(
+    label: String,
     value: String,
-    onValueChange: (String) -> Unit,
-    onIncrement: () -> Unit,
-    onDecrement: () -> Unit,
+    increment: Double,
     prefix: String? = null,
-    keyboardType: KeyboardType = KeyboardType.Text
+    isValid: Boolean = true,
+    onValueChange: (String) -> Unit
 ) {
-    Box(
-        modifier = modifier
-            .height(44.dp)
-            .background(Color(0xFF1E1E2E), RoundedCornerShape(4.dp))
-            .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.CenterStart
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (prefix != null) {
-                Text(prefix, color = Color.White, modifier = Modifier.padding(end = 4.dp))
-            }
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
-                cursorBrush = SolidColor(Color.White),
-                keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                modifier = Modifier.weight(1f)
-            )
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    Icons.Default.KeyboardArrowUp,
-                    contentDescription = "Increment",
-                    tint = Color.Gray,
-                    modifier = Modifier.size(20.dp).clickable { onIncrement() }
+        Text(label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(70.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(40.dp)
+                .background(Color(0xFF1E1E2E), RoundedCornerShape(8.dp))
+                .border(
+                    width = 1.dp, 
+                    color = if (isValid) Color.Gray.copy(alpha = 0.5f) else Color(0xFFE57373), 
+                    shape = RoundedCornerShape(8.dp)
                 )
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Decrement",
-                    tint = Color.Gray,
-                    modifier = Modifier.size(20.dp).clickable { onDecrement() }
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (prefix != null) Text(prefix, color = Color.White, modifier = Modifier.padding(end = 4.dp))
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    textStyle = TextStyle(color = if (isValid) Color.White else Color(0xFFE57373), fontSize = 15.sp),
+                    cursorBrush = SolidColor(Color.White),
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
                 )
+                
+                // Steppers
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Increase",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(18.dp).clickable {
+                            val current = value.toDoubleOrNull() ?: 0.0
+                            val newVal = current + increment
+                            onValueChange(if (increment < 1.0) String.format(Locale.US, "%.2f", newVal) else newVal.toInt().toString())
+                        }
+                    )
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Decrease",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(18.dp).clickable {
+                            val current = value.toDoubleOrNull() ?: 0.0
+                            val newVal = Math.max(0.0, current - increment)
+                            onValueChange(if (increment < 1.0) String.format(Locale.US, "%.2f", newVal) else newVal.toInt().toString())
+                        }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun TransactionRow(item: TransactionItem, showBackground: Boolean) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Column(
+fun SlipInputRow(
+    label: String, 
+    value: String, 
+    placeholder: String = "",
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    prefix: String? = null,
+    isValid: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    onValueChange: ((String) -> Unit)? = null
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                color = if (showBackground) Color.Gray.copy(alpha = 0.05f) else Color.Transparent,
-                shape = RoundedCornerShape(8.dp)
-            )
-            .clickable { expanded = !expanded }
-            .padding(vertical = 12.dp, horizontal = 8.dp)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = item.date,
-                color = Color.White,
-                fontSize = 13.sp,
-                modifier = Modifier.width(85.dp)
-            )
-            
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.description,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = 18.sp
+        Text(label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(70.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(40.dp)
+                .background(Color(0xFF1E1E2E), RoundedCornerShape(8.dp))
+                .border(
+                    width = 1.dp, 
+                    color = if (isValid) Color.Gray.copy(alpha = 0.5f) else Color(0xFFE57373), 
+                    shape = RoundedCornerShape(8.dp)
                 )
-            }
-            
-            Text(
-                text = "${if (item.isDebit) "-" else "+"}\$${item.amount}",
-                color = if (item.isDebit) Color(0xFFE57373) else Color(0xFF4CAF50),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.padding(start = 8.dp)
-            )
-        }
-
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+                .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(start = 85.dp, top = 8.dp)
-                    .fillMaxWidth()
-            ) {
-                if (item.pricePerUnit.isNotEmpty()) {
-                    Text(
-                        text = "· D05 @ ${item.pricePerUnit}",
-                        color = Color.Gray,
-                        fontSize = 12.sp
-                    )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (prefix != null) Text(prefix, color = Color.White, modifier = Modifier.padding(end = 4.dp))
+                if (onValueChange != null) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (value.isEmpty()) {
+                            Text(placeholder, color = Color.Gray, fontSize = 15.sp)
+                        }
+                        BasicTextField(
+                            value = value,
+                            onValueChange = onValueChange,
+                            textStyle = TextStyle(color = if (isValid) Color.White else Color(0xFFE57373), fontSize = 15.sp),
+                            cursorBrush = SolidColor(Color.White),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
+                } else {
+                    Text(value, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
                 }
-                if (item.fees.isNotEmpty()) {
-                    Text(
-                        text = "· Fee @ ${item.fees}",
-                        color = Color.Gray,
-                        fontSize = 12.sp
-                    )
-                }
-                if (item.pnl.isNotEmpty()) {
-                    val pnlColor = if (item.pnl.startsWith("-")) Color(0xFFE57373) else Color(0xFF4CAF50)
-                    Text(
-                        text = "· Profit/Loss @ ${item.pnl} (${item.pnlPercent}%)",
-                        color = pnlColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                if (icon != null) Icon(icon, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(18.dp))
             }
         }
     }

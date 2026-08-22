@@ -22,6 +22,7 @@ object CsvHandler {
      * Reads a selected CSV file from Uri and parses broker data.
      * Specifically handles Webull's 3-line-per-entry format.
      */
+    // Reads and parses a Webull CSV file to extract transaction history and account details.
     fun processCsvImport(uri: Uri, context: Context): CsvParseResult {
         Log.d("CsvHandler", "Starting Webull CSV import from URI: $uri")
         val allLines = mutableListOf<String>()
@@ -59,9 +60,17 @@ object CsvHandler {
                 // 1. Extract Symbol (e.g., S63)
                 val symbol = line1.replace("\"", "").replace("'", "").trim()
                 
-                // 2. Extract Side (BUY/SELL) and Qty from Line 2
+                // 2. Extract Side (BUY/SELL), Status, and Qty from Line 2
                 val line2Parts = line2.split(",")
                 val side = line2Parts.getOrNull(1) ?: "" // BUY
+                val status = line2Parts.getOrNull(2) ?: "" // Filled
+                
+                // Rule 1: Filter only "Filled" rows
+                if (!status.equals("Filled", ignoreCase = true)) {
+                    i += 3
+                    continue
+                }
+
                 val qtyPart = line2Parts.getOrNull(3) ?: "0/0" // 100/100
                 val filledQty = qtyPart.split("/").firstOrNull()?.trim() ?: "0"
                 
@@ -69,7 +78,11 @@ object CsvHandler {
                 val line3Parts = line3.split(",")
                 val priceRaw = line3Parts.getOrNull(0)?.replace("\"", "")?.trim() ?: "0.00"
                 val filledTimeFull = line3Parts.getOrNull(3) ?: "" // 2026/08/03 09:15:17 SGT
-                val dateOnly = filledTimeFull.split(" ").firstOrNull() ?: "Unknown"
+                
+                // Date and Time extraction
+                val timeParts = filledTimeFull.split(" ")
+                val dateOnly = timeParts.getOrNull(0) ?: "Unknown"
+                val timeOnly = timeParts.getOrNull(1) ?: "00:00:00"
 
                 // 4. Calculate total amount with exact Webull fees
                 val priceNum = priceRaw.toDoubleOrNull() ?: 0.0
@@ -94,27 +107,25 @@ object CsvHandler {
                 val pricePerUnitStr = String.format(java.util.Locale.US, "%.2f", priceNum)
                 val feesStr = String.format(java.util.Locale.US, "%.2f", totalFees)
                 
-                // Mock PnL for display purposes (usually calculated vs current price)
-                val mockPnl = (tradeAmount * 0.05).let { if ((1..2).random() == 1) it else -it }
-                val mockPnlPercent = (mockPnl / tradeAmount) * 100.0
-                
                 val action = if (side.equals("BUY", true)) "Bought" else "Sold"
                 val isDebit = side.equals("BUY", true)
 
                 val tx = TransactionItem(
                     id = UUID.randomUUID().toString(),
                     date = dateOnly,
-                    description = "$action $filledQty unit $symbol using Webull",
+                    time = timeOnly,
+                    symbol = symbol,
+                    description = "$action $filledQty unit $symbol using Webull SG",
                     amount = totalAmountStr,
                     isDebit = isDebit,
-                    brokerage = "Webull",
+                    brokerage = "Webull SG",
                     isAuto = true,
                     units = filledQty,
                     action = action,
                     pricePerUnit = pricePerUnitStr,
                     fees = feesStr,
-                    pnl = String.format(java.util.Locale.US, "%.2f", mockPnl),
-                    pnlPercent = String.format(java.util.Locale.US, "%.2f", mockPnlPercent)
+                    pnl = "0.00", // Will be calculated in UI based on previous close
+                    pnlPercent = "0.00"
                 )
                 
                 importedTransactions.add(tx)
@@ -136,6 +147,7 @@ object CsvHandler {
         )
     }
 
+    // Attempts to find an account number or user ID within a given text string using regex patterns.
     private fun findAccountNumber(text: String): String {
         val patterns = listOf(
             "Account[\\s:]*([A-Z0-9]{5,15})".toRegex(RegexOption.IGNORE_CASE),

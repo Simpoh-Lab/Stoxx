@@ -2,37 +2,18 @@ package com.example.investmenttracker.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -48,9 +29,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.example.investmenttracker.data.StockItem
 
+// A reusable list item component displaying summary information and a sparkline for a specific stock.
 @Composable
 fun StockCard(
     stock: StockItem,
@@ -64,71 +45,100 @@ fun StockCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .height(72.dp)
             .clickable { onCardClick() },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D))
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding((screenWidth.value * 0.03f).dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .fillMaxSize()
+                .padding(horizontal = (screenWidth.value * 0.03f).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1.5f)) {
+            // 1. Symbol Box (e.g. D05)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(Color(0xFF1E1E2E), shape = RoundedCornerShape(8.dp))
+                    .border(1.dp, Color.Gray.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
-                    text = if (stock.symbol.startsWith("SGX:")) stock.symbol else "SGX: ${stock.symbol}",
+                    text = stock.symbol.take(3),
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
-                    fontSize = (screenWidth.value * 0.04f).sp
+                    fontSize = 12.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // 2. Symbol and Long Name
+            Column(modifier = Modifier.weight(1.2f)) {
+                Text(
+                    text = if (stock.symbol.endsWith(".SI")) stock.symbol else "${stock.symbol}.SI",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
                 )
                 Text(
                     text = stock.name,
-                    color = Color.LightGray,
-                    fontSize = (screenWidth.value * 0.032f).sp,
+                    color = Color.Gray,
+                    fontSize = 10.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
+            // 3. P/L and Sparkline
             Column(
-                modifier = Modifier.weight(1.2f),
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.End
             ) {
                 Text(
-                    text = "${stock.currentPrice} SGD",
+                    text = stock.currentPrice,
                     color = statusColor,
                     fontWeight = FontWeight.Bold,
-                    fontSize = (screenWidth.value * 0.035f).sp
+                    fontSize = 13.sp
                 )
                 Text(
                     text = stock.priceChangePercentage,
                     color = statusColor,
-                    fontSize = (screenWidth.value * 0.028f).sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             SparklineChart(
                 data = stock.chartData,
                 lineColor = statusColor,
                 modifier = Modifier
-                    .width((screenWidth.value * 0.15f).dp)
-                    .height((screenWidth.value * 0.09f).dp)
+                    .width(40.dp)
+                    .height(20.dp)
             )
 
-            IconButton(onClick = { onDeleteClick(stock) }, modifier = Modifier.size((screenWidth.value * 0.1f).dp)) {
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // 4. Delete Button
+            IconButton(
+                onClick = { onDeleteClick(stock) },
+                modifier = Modifier.size(32.dp)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
-                    contentDescription = "Delete Stock",
-                    tint = Color.Gray,
-                    modifier = Modifier.size((screenWidth.value * 0.05f).dp)
+                    contentDescription = "Delete",
+                    tint = Color.Gray.copy(alpha = 0.6f),
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
     }
 }
 
+// Draws a mini line chart with an optional dotted latest-price line and price label.
 @Composable
 fun SparklineChart(
     data: List<Float>,
@@ -144,10 +154,9 @@ fun SparklineChart(
         val min = data.minOrNull() ?: 0f
         val max = data.maxOrNull() ?: 1f
         
-        // Add a small buffer to the range to prevent flatlines if all points are very close
         val baseRange = max - min
-        val range = if (baseRange < 1f) 10f else baseRange * 1.2f
-        val adjustedMin = if (baseRange < 1f) min - 5f else min - (baseRange * 0.1f)
+        val range = if (baseRange < 0.01f) 1f else baseRange * 1.2f
+        val adjustedMin = if (baseRange < 0.01f) min - 0.5f else min - (baseRange * 0.1f)
 
         val path = Path()
         val widthStep = size.width / (data.size - 1)
@@ -161,14 +170,13 @@ fun SparklineChart(
         drawPath(
             path = path,
             color = lineColor,
-            style = Stroke(width = 2.dp.toPx())
+            style = Stroke(width = 1.5.dp.toPx())
         )
         
         if (showLatestPriceLine && latestPrice != null) {
             val lastValue = data.last()
             val y = size.height - ((lastValue - adjustedMin) / range * size.height)
             
-            // Draw dotted line
             drawLine(
                 color = Color.Gray.copy(alpha = 0.5f),
                 start = Offset(0f, y),
@@ -177,7 +185,6 @@ fun SparklineChart(
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
             )
             
-            // Draw price label background
             val textLayoutResult = textMeasurer.measure(
                 text = latestPrice,
                 style = TextStyle(
@@ -199,14 +206,6 @@ fun SparklineChart(
                 cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
             )
             
-            drawRoundRect(
-                color = Color.Gray.copy(alpha = 0.5f),
-                topLeft = Offset(boxX, boxY),
-                size = Size(boxWidth, boxHeight),
-                cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-                style = Stroke(width = 1.dp.toPx())
-            )
-            
             drawText(
                 textMeasurer = textMeasurer,
                 text = latestPrice,
@@ -221,6 +220,7 @@ fun SparklineChart(
     }
 }
 
+// Displays a popup dialog with a text field for entering and adding new stock ticker symbols.
 @Composable
 fun AddStockDialog(onDismiss: () -> Unit, onAddStock: (String) -> Unit) {
     var symbol by remember { mutableStateOf("") }

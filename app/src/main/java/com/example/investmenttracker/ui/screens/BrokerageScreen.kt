@@ -66,6 +66,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+// Manages the connections to various brokerage accounts and handles CSV data imports.
 @Composable
 fun BrokerageScreen(
     onBackToHome: () -> Unit,
@@ -134,16 +135,7 @@ fun BrokerageScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFF1E1E2E),
-        bottomBar = {
-            AppBottomNavigation(
-                onHomeClick = onBackToHome,
-                onGraphClick = onNavigateToTransactions,
-                onSettingsClick = onNavigateToSettings,
-                onBrokerageClick = { /* Current */ },
-                highlightIndex = 2
-            )
-        }
+        containerColor = Color(0xFF1E1E2E)
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -203,6 +195,14 @@ fun BrokerageScreen(
                         TextButton(onClick = {
                             brokerToUnbind?.let { broker ->
                                 UserPreferences.clearBrokerData(context, broker.id)
+                                
+                                // Remove all transactions related to this broker
+                                val currentTransactions = UserPreferences.loadTransactions(context).toMutableList()
+                                val filteredTransactions = currentTransactions.filter { 
+                                    !it.brokerage.contains(broker.name, ignoreCase = true) 
+                                }
+                                UserPreferences.saveTransactions(context, filteredTransactions)
+
                                 val index = brokers.indexOfFirst { it.id == broker.id }
                                 if (index != -1) {
                                     brokers[index] = BrokerCardItem(id = broker.id, name = broker.name, isImported = false)
@@ -233,6 +233,7 @@ enum class ImportStatus {
     Idle, Checking, Found, Invalid
 }
 
+// Displays a full-screen dialog showing the progress and result of a CSV file validation.
 @Composable
 fun ImportStatusOverlay(status: ImportStatus) {
     Dialog(onDismissRequest = {}) {
@@ -306,6 +307,7 @@ fun ImportStatusOverlay(status: ImportStatus) {
     }
 }
 
+// The specific header for the Brokerage screen.
 @Composable
 fun BrokerageHeaderSection(onHomeClick: () -> Unit) {
     Card(
@@ -326,6 +328,7 @@ fun BrokerageHeaderSection(onHomeClick: () -> Unit) {
     }
 }
 
+// A card component used in the grid to represent a single brokerage with its import status.
 @Composable
 fun BrokerGridCard(
     broker: BrokerCardItem,

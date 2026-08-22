@@ -5,34 +5,21 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
@@ -48,28 +35,43 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.sp
+import com.example.investmenttracker.data.BrokerCardItem
 import com.example.investmenttracker.data.LiveNewsItem
+import com.example.investmenttracker.data.NotificationHelper
 import com.example.investmenttracker.data.StockItem
-import kotlin.time.Duration.Companion.milliseconds
+import com.example.investmenttracker.data.fetchPortfolioNews
+import com.example.investmenttracker.data.fetchSGXStockDynamic
+import com.example.investmenttracker.ui.components.AddStockDialog
+import com.example.investmenttracker.ui.components.BrokerageHomeSection
+import com.example.investmenttracker.ui.components.HeaderSection
+import com.example.investmenttracker.ui.components.NewsSection
+import com.example.investmenttracker.ui.components.OutlinedSection
+import com.example.investmenttracker.ui.components.StockCard
+import com.example.investmenttracker.ui.screens.BrokerageScreen
+import com.example.investmenttracker.ui.screens.SettingsScreen
+import com.example.investmenttracker.ui.screens.SplashScreen
+import com.example.investmenttracker.ui.screens.StockDetailsScreen
+import com.example.investmenttracker.ui.screens.TransactionsScreen
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
-import com.example.investmenttracker.data.*
-import com.example.investmenttracker.ui.components.*
-import com.example.investmenttracker.ui.screens.*
-
+import kotlin.time.Duration.Companion.milliseconds
 
 enum class CurrentScreen {
     SPLASH, HOME, SETTINGS, BROKERAGE, STOCK_DETAILS, TRANSACTIONS
 }
 
 class MainActivity : ComponentActivity() {
+    // Entry point of the activity, sets up the Compose UI and initializes navigation.
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         
         // Initialize Notification Channel
@@ -84,6 +86,11 @@ class MainActivity : ComponentActivity() {
                 val stocks = remember { mutableStateListOf<StockItem>() }
                 val newsList = remember { mutableStateListOf<LiveNewsItem>() }
                 val brokers = remember { mutableStateListOf<BrokerCardItem>() }
+
+                // System Back Button Handling
+                BackHandler(enabled = currentScreen != CurrentScreen.HOME && currentScreen != CurrentScreen.SPLASH) {
+                    currentScreen = CurrentScreen.HOME
+                }
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -100,19 +107,16 @@ class MainActivity : ComponentActivity() {
                         )
                         CurrentScreen.HOME -> MainScreen(
                             onNavigateToSettings = { currentScreen = CurrentScreen.SETTINGS },
-                            onNavigateToBrokerage = { currentScreen = CurrentScreen.BROKERAGE },
                             onNavigateToTransactions = { currentScreen = CurrentScreen.TRANSACTIONS },
                             onStockClick = { stock ->
                                 selectedStock = stock
                                 currentScreen = CurrentScreen.STOCK_DETAILS
                             },
-                            initialStocks = stocks,
-                            initialNews = newsList,
-                            initialBrokers = brokers
+                            stocks = stocks,
+                            newsList = newsList
                         )
                         CurrentScreen.SETTINGS -> SettingsScreen(
                             onBackToHome = { currentScreen = CurrentScreen.HOME },
-                            onNavigateToBrokerage = { currentScreen = CurrentScreen.BROKERAGE },
                             onNavigateToTransactions = { currentScreen = CurrentScreen.TRANSACTIONS }
                         )
                         CurrentScreen.BROKERAGE -> BrokerageScreen(
@@ -123,7 +127,8 @@ class MainActivity : ComponentActivity() {
                         CurrentScreen.TRANSACTIONS -> TransactionsScreen(
                             onBackToHome = { currentScreen = CurrentScreen.HOME },
                             onNavigateToSettings = { currentScreen = CurrentScreen.SETTINGS },
-                            onNavigateToBrokerage = { currentScreen = CurrentScreen.BROKERAGE }
+                            onNavigateToBrokerage = { currentScreen = CurrentScreen.BROKERAGE },
+                            stocks = stocks
                         )
                         CurrentScreen.STOCK_DETAILS -> {
                             selectedStock?.let { stock ->
@@ -143,32 +148,38 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// The main dashboard screen displaying user profile, news, and stock watchlist.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     onNavigateToSettings: () -> Unit,
-    onNavigateToBrokerage: () -> Unit,
     onNavigateToTransactions: () -> Unit,
     onStockClick: (StockItem) -> Unit,
-    initialStocks: List<StockItem>,
-    initialNews: List<LiveNewsItem>,
-    initialBrokers: List<BrokerCardItem>
+    stocks: MutableList<StockItem>,
+    newsList: MutableList<LiveNewsItem>
 ) {
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
     val screenHeight = configuration.screenHeightDp.dp
 
-    val stocks = remember { mutableStateListOf<StockItem>().apply { addAll(initialStocks) } }
-    val newsList = remember { mutableStateListOf<LiveNewsItem>().apply { addAll(initialNews) } }
     var isNewsLoading by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
-    var showErrorDialog by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
+    var showStockErrorPopup by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     val username = remember { UserPreferences.getUsername(context).ifBlank { "User" } }
-    val brokers = remember { mutableStateListOf<BrokerCardItem>().apply { addAll(initialBrokers) } }
+
+    var isMenuOpen by remember { mutableStateOf(false) }
+
+    // Auto-hide error popup after 3 seconds
+    LaunchedEffect(showStockErrorPopup) {
+        if (showStockErrorPopup) {
+            delay(3000)
+            showStockErrorPopup = false
+        }
+    }
 
     // Permission Launcher for Android 13+
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -185,6 +196,7 @@ fun MainScreen(
         }
     }
 
+    // Fetches updated stock prices for all saved symbols in the background.
     suspend fun refreshStockPricesOnly() {
         val currentSymbols = getSavedStockSymbols(context)
         if (currentSymbols.isEmpty()) {
@@ -202,13 +214,15 @@ fun MainScreen(
             if (allAlerts.isNotEmpty()) {
                 updatedStocks.forEach { stock ->
                     val stockAlerts = allAlerts.filter { it.symbol == stock.symbol }
-                    val currentPrice = stock.currentPrice.replace("S$", "").replace("$", "").toDoubleOrNull() ?: 0.0
+                    val currentPriceText = stock.currentPrice.replace("S$", "").replace("$", "").trim()
+                    val currentPrice = currentPriceText.toDoubleOrNull() ?: 0.0
 
                     stockAlerts.forEach { alert ->
                         val targetPrice = alert.price.toDoubleOrNull() ?: 0.0
                         val isTriggered = if (alert.isAbove) currentPrice >= targetPrice else currentPrice <= targetPrice
                         
-                        if (isTriggered && UserPreferences.getNotificationsEnabled(context)) {
+                        // Only notify if triggered, active, and global notifications are enabled
+                        if (isTriggered && alert.isActive && UserPreferences.getNotificationsEnabled(context)) {
                             NotificationHelper.showPriceAlert(
                                 context = context,
                                 symbol = stock.symbol,
@@ -216,8 +230,6 @@ fun MainScreen(
                                 targetPrice = alert.price,
                                 isAbove = alert.isAbove
                             )
-                            // Remove alert once triggered? User didn't specify, but usually good practice.
-                            // For now I'll leave it to let them see it multiple times if price fluctuates.
                         }
                     }
                 }
@@ -229,33 +241,49 @@ fun MainScreen(
         }
     }
 
+    // Performs a full data refresh including brokers, stock prices, and news.
     suspend fun refreshAllData() {
-        isLoading = true
-        isNewsLoading = true
-        
-        // 1. Refresh Brokers
-        val loadedBrokers = listOf(
-            UserPreferences.loadBrokerData(context, "webull", "Webull"),
-            UserPreferences.loadBrokerData(context, "moomoo", "Moomoo"),
-            UserPreferences.loadBrokerData(context, "coinbase", "Coinbase"),
-            UserPreferences.loadBrokerData(context, "syfe", "Syfe")
-        )
-        brokers.clear()
-        brokers.addAll(loadedBrokers)
+        try {
+            isLoading = true
+            isNewsLoading = true
+            
+            // 1. Refresh Brokers
+            val loadedBrokers = listOf(
+                UserPreferences.loadBrokerData(context, "webull", "Webull"),
+                UserPreferences.loadBrokerData(context, "moomoo", "Moomoo"),
+                UserPreferences.loadBrokerData(context, "coinbase", "Coinbase"),
+                UserPreferences.loadBrokerData(context, "syfe", "Syfe")
+            )
 
-        // 2. Refresh Stock Prices & Colors (Parallel)
-        refreshStockPricesOnly()
+            // 2. Refresh Stock Prices & Colors (Parallel)
+            refreshStockPricesOnly()
 
-        // 3. Refresh News
-        val savedSymbols = getSavedStockSymbols(context)
-        if (savedSymbols.isNotEmpty()) {
-            newsList.clear()
-            val updatedNews = fetchPortfolioNews(savedSymbols)
-            newsList.addAll(updatedNews)
+            // 3. Refresh News
+            val savedSymbols = getSavedStockSymbols(context)
+            if (savedSymbols.isNotEmpty()) {
+                val updatedNews = fetchPortfolioNews(savedSymbols)
+                
+                // Check for new news to trigger System 2 notification
+                if (updatedNews.isNotEmpty()) {
+                    val latestItem = updatedNews.first()
+                    val lastNotifiedTime = UserPreferences.getLastNewsTimestamp(context)
+                    
+                    // Only notify if this is a newer article than the last one seen
+                    if (latestItem.timestamp > lastNotifiedTime && UserPreferences.getNotificationsEnabled(context)) {
+                        NotificationHelper.showNewsAlert(context, latestItem.stockSymbol, latestItem.title)
+                        UserPreferences.saveLastNewsTimestamp(context, latestItem.timestamp)
+                    }
+                }
+
+                newsList.clear()
+                newsList.addAll(updatedNews)
+            }
+        } catch (_: Exception) {
+            // Silently ignore or handle error
+        } finally {
+            isLoading = false
+            isNewsLoading = false
         }
-
-        isLoading = false
-        isNewsLoading = false
     }
 
     // 1. Initial Data check - if empty, try to refresh once
@@ -297,16 +325,7 @@ fun MainScreen(
     val pullToRefreshState = rememberPullToRefreshState()
 
     Scaffold(
-        containerColor = Color(0xFF1E1E2E),
-        bottomBar = {
-            AppBottomNavigation(
-                onHomeClick = { /* Already Home */ },
-                onGraphClick = onNavigateToTransactions,
-                onSettingsClick = onNavigateToSettings,
-                onBrokerageClick = onNavigateToBrokerage,
-                highlightIndex = 0
-            )
-        }
+        containerColor = Color(0xFF1E1E2E)
     ) { paddingValues ->
         PullToRefreshBox(
             isRefreshing = isNewsLoading || isLoading,
@@ -323,112 +342,105 @@ fun MainScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding((screenWidth.value * 0.04f).dp)
             ) {
+                // 1. Header with integrated Navigation Menu
                 HeaderSection(
-                    userName = username
-                )
-
-                Spacer(modifier = Modifier.height((screenHeight.value * 0.025f).dp))
-
-                val linkedBrokers = brokers.filter { it.isImported }
-                if (linkedBrokers.isNotEmpty()) {
-                    BrokerageHomeSection(linkedBrokers = linkedBrokers)
-                    Spacer(modifier = Modifier.height((screenHeight.value * 0.025f).dp))
-                }
-
-                NewsSection(
-                    newsList = newsList,
-                    isLoading = isNewsLoading,
-                    hasStocks = stocks.isNotEmpty(),
-                    onRefresh = {
-                        coroutineScope.launch {
-                            refreshAllData()
+                    userName = username,
+                    isMenuOpen = isMenuOpen,
+                    currentScreen = CurrentScreen.HOME,
+                    onMenuToggle = { isMenuOpen = !isMenuOpen },
+                    onNavigate = { screen ->
+                        isMenuOpen = false
+                        when (screen) {
+                            CurrentScreen.HOME -> { /* Already here */ }
+                            CurrentScreen.TRANSACTIONS -> onNavigateToTransactions()
+                            CurrentScreen.SETTINGS -> onNavigateToSettings()
+                            else -> {}
                         }
                     }
                 )
 
-                Spacer(modifier = Modifier.height((screenHeight.value * 0.025f).dp))
+                Spacer(modifier = Modifier.height((screenHeight.value * 0.02f).dp))
 
-                // Stocks Section Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = (screenWidth.value * 0.04f).dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "📊 Stocks",
-                            color = Color.White,
-                            fontSize = (screenWidth.value * 0.05f).sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.width((screenWidth.value * 0.02f).dp))
-
-                        Box(
-                            modifier = Modifier
-                                .size((screenWidth.value * 0.07f).dp)
-                                .background(Color(0xFF2B2B3D), shape = RoundedCornerShape(6.dp))
-                                .clickable { 
-                                    showAddDialog = true 
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add, 
-                                contentDescription = "Add Stock",
-                                tint = Color.White,
-                                modifier = Modifier.size((screenWidth.value * 0.045f).dp)
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // 2. News Section with Outlined Backdrop
+                        OutlinedSection(title = "News") {
+                            NewsSection(
+                                newsList = newsList,
+                                isLoading = isNewsLoading,
+                                hasStocks = stocks.isNotEmpty()
                             )
                         }
-                    }
-                }
 
-                Spacer(modifier = Modifier.height((screenHeight.value * 0.015f).dp))
+                        Spacer(modifier = Modifier.height((screenHeight.value * 0.03f).dp))
 
-                if (isLoading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = Color(0xFF4CAF50), modifier = Modifier.size((screenWidth.value * 0.1f).dp))
-                    }
-                } else if (stocks.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .weight(1f)
-                            .background(Color.White.copy(alpha = 0.02f), shape = RoundedCornerShape(16.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No stocks added yet. Tap '+' to add.",
-                            color = Color.Gray,
-                            fontSize = (screenWidth.value * 0.035f).sp
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        items(stocks) { stock ->
-                            StockCard(
-                                stock = stock,
-                                onCardClick = { onStockClick(stock) },
-                                onDeleteClick = { itemToDelete ->
-                                    removeStockSymbol(context, itemToDelete.symbol)
-                                    stocks.remove(itemToDelete)
-                                    coroutineScope.launch {
-                                        refreshAllData()
+                        // 3. Stocks Section with Outlined Backdrop
+                        OutlinedSection(
+                            title = "Stocks",
+                            action = {
+                                Button(
+                                    onClick = { showAddDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2B2B3D)),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(32.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray.copy(alpha = 0.3f))
+                                ) {
+                                    Text("+ New Stock", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF4CAF50))
+                                }
+                            }
+                        ) {
+                            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                                if (isLoading && stocks.isEmpty()) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = Color(0xFF4CAF50))
+                                    }
+                                } else if (stocks.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("Your watchlist is empty", color = Color.Gray)
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        contentPadding = PaddingValues(vertical = 8.dp),
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        items(stocks) { stock ->
+                                            StockCard(
+                                                stock = stock,
+                                                onCardClick = { onStockClick(stock) },
+                                                onDeleteClick = { itemToDelete ->
+                                                    removeStockSymbol(context, itemToDelete.symbol)
+                                                    stocks.remove(itemToDelete)
+                                                }
+                                            )
+                                        }
                                     }
                                 }
-                            )
+                            }
                         }
                     }
+
+                    // Stock Not Found Pop-up Overlay
+                    if (showStockErrorPopup) {
+                        StockErrorPopup(
+                            onDismiss = { showStockErrorPopup = false },
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .fillMaxWidth(0.9f)
+                        )
+                    }
                 }
+                
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -439,34 +451,95 @@ fun MainScreen(
             onAddStock = { rawSymbol ->
                 showAddDialog = false
                 coroutineScope.launch {
-                    isLoading = true
-                    val fetchedStock = fetchSGXStockDynamic(rawSymbol)
-                    if (fetchedStock != null) {
-                        saveStockSymbol(context, rawSymbol)
-                        refreshAllData()
-                    } else {
-                        showErrorDialog = true
+                    try {
+                        isLoading = true
+                        val fetchedStock = fetchSGXStockDynamic(rawSymbol)
+                        if (fetchedStock != null) {
+                            saveStockSymbol(context, rawSymbol)
+                            refreshAllData()
+                        } else {
+                            showStockErrorPopup = true
+                        }
+                    } catch (_: Exception) {
+                        showStockErrorPopup = true
+                    } finally {
+                        isLoading = false
                     }
-                    isLoading = false
                 }
             }
         )
     }
+}
 
-    if (showErrorDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showErrorDialog = false },
-            containerColor = Color(0xFF2B2B3D),
-            title = { Text("Stock Not Found", color = Color.White) },
-            text = { Text("The stock code you entered could not be found or the service is temporarily unavailable. Please check the code and try again.", color = Color.LightGray) },
-            confirmButton = {
-                androidx.compose.material3.Button(
-                    onClick = { showErrorDialog = false },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+// A centered pop-up that appears when a stock ticker cannot be found or there is a network error.
+@Composable
+fun StockErrorPopup(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(240.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = "Stock Invalid",
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 12.dp),
+                    thickness = 0.5.dp,
+                    color = Color.Gray.copy(alpha = 0.3f)
+                )
+                
+                Text(
+                    text = "Possible Cause :",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "1. No Internet Connection\n2. Wrong Stock Code",
+                    color = Color.Gray,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                
+                Spacer(modifier = Modifier.weight(0.1f))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("OK")
+                    Text(
+                        text = "\u2192 Check and Try Again !",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 0.dp),
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-        )
+        }
     }
 }

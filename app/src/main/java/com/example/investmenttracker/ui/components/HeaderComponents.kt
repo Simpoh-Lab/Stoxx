@@ -1,35 +1,24 @@
 package com.example.investmenttracker.ui.components
 
 import androidx.compose.foundation.Image
+import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -38,13 +27,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.investmenttracker.CurrentScreen
 import com.example.investmenttracker.UserPreferences
 import com.example.investmenttracker.loadOrInitializeUserAvatar
 import java.util.Calendar
 
+// Renders the dashboard header featuring a greeting, user name, and profile photo.
 @Composable
 fun HeaderSection(
-    userName: String
+    userName: String,
+    isMenuOpen: Boolean,
+    currentScreen: CurrentScreen,
+    onMenuToggle: () -> Unit,
+    onNavigate: (CurrentScreen) -> Unit,
+    customTitle: String? = null,
+    customSubtitle: String? = null,
+    showProfile: Boolean = true
 ) {
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
@@ -66,75 +64,179 @@ fun HeaderSection(
         else -> "Good Evening,"
     }
 
-    // Single large rounded card for the header as per sketch
-    Card(
+    // Animation for the menu icon rotation
+    val rotationAngle by animateFloatAsState(
+        targetValue = if (isMenuOpen) 90f else 0f,
+        label = "menu_rotation"
+    )
+
+    val displayTitle = customTitle ?: greeting
+    val displaySubtitle = customSubtitle ?: userName
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height((screenHeight.value * 0.12f).dp),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D))
+            .padding(horizontal = (screenWidth.value * 0.04f).dp)
     ) {
-        Row(
+        // 1. The Header Card
+        Card(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = (screenWidth.value * 0.06f).dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxWidth()
+                .height((screenHeight.value * 0.1f).dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2B3D))
         ) {
-            Box(
+            Row(
                 modifier = Modifier
-                    .size((screenHeight.value * 0.07f).dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF3B3B52)),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .padding(horizontal = (screenWidth.value * 0.06f).dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!profileUriString.isNullOrBlank()) {
-                    AsyncImage(
-                        model = profileUriString,
-                        contentDescription = "User Profile Photo",
-                        contentScale = ContentScale.Crop,
+                if (showProfile) {
+                    // Profile Photo
+                    Box(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .size((screenHeight.value * 0.065f).dp)
                             .clip(CircleShape)
+                            .background(Color(0xFF3B3B52)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!profileUriString.isNullOrBlank()) {
+                            AsyncImage(
+                                model = profileUriString,
+                                contentDescription = "User Profile Photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                            )
+                        } else if (defaultAvatarRes != 0) {
+                            Image(
+                                painter = painterResource(id = defaultAvatarRes),
+                                contentDescription = "Default Avatar",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "User Profile Avatar",
+                                tint = Color.White,
+                                modifier = Modifier.size((screenHeight.value * 0.035f).dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width((screenWidth.value * 0.04f).dp))
+                }
+
+                // Greeting and Username
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = if (showProfile) Alignment.Start else Alignment.Start
+                ) {
+                    Text(
+                        text = displayTitle,
+                        color = Color.White,
+                        fontSize = (screenWidth.value * 0.045f).sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
-                } else if (defaultAvatarRes != 0) {
-                    Image(
-                        painter = painterResource(id = defaultAvatarRes),
-                        contentDescription = "Default Avatar",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
+                    Text(
+                        text = displaySubtitle,
+                        color = Color.Gray,
+                        fontSize = (screenWidth.value * 0.04f).sp,
+                        fontWeight = FontWeight.Medium
                     )
-                } else {
+                }
+
+                // Menu Button (Hamburger or X) with Rotation
+                IconButton(
+                    onClick = onMenuToggle,
+                    modifier = Modifier
+                        .size((screenHeight.value * 0.07f).dp)
+                        .background(Color(0xFF3B3B52), CircleShape)
+                        .rotate(rotationAngle)
+                ) {
                     Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "User Profile Avatar",
+                        imageVector = if (isMenuOpen) Icons.Default.Close else Icons.Default.Menu,
+                        contentDescription = "Menu",
                         tint = Color.White,
-                        modifier = Modifier.size((screenHeight.value * 0.04f).dp)
+                        modifier = Modifier.size((screenHeight.value * 0.035f).dp)
                     )
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.width((screenWidth.value * 0.04f).dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = greeting,
-                    color = Color.White,
-                    fontSize = (screenWidth.value * 0.055f).sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = userName,
-                    color = Color.White,
-                    fontSize = (screenWidth.value * 0.055f).sp,
-                    fontWeight = FontWeight.Bold
-                )
+        // 2. The Navigation Button Row with Expand/Fade Animation
+        AnimatedVisibility(
+            visible = isMenuOpen,
+            enter = expandVertically(animationSpec = tween(400)) + fadeIn(animationSpec = tween(400)),
+            exit = shrinkVertically(animationSpec = tween(300)) + fadeOut(animationSpec = tween(300))
+        ) {
+            Column {
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .background(Color(0xFF2B2B3D), shape = RoundedCornerShape(25.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    NavButton(
+                        text = "HOME", 
+                        isActive = currentScreen == CurrentScreen.HOME, 
+                        onClick = { onNavigate(CurrentScreen.HOME) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    NavButton(
+                        text = "TRANSACTION", 
+                        isActive = currentScreen == CurrentScreen.TRANSACTIONS, 
+                        onClick = { onNavigate(CurrentScreen.TRANSACTIONS) },
+                        modifier = Modifier.weight(1.4f)
+                    )
+                    NavButton(
+                        text = "SETTING", 
+                        isActive = currentScreen == CurrentScreen.SETTINGS, 
+                        onClick = { onNavigate(CurrentScreen.SETTINGS) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
 }
 
+// A stylized navigation button for the header menu.
+@Composable
+fun NavButton(
+    text: String,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (isActive) Color(0xFF4CAF50) else Color(0xFF3B3B52))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (isActive) Color.White else Color.LightGray,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+// A standardized, bold header specifically for the Settings screen.
 @Composable
 fun SettingsHeaderSection(onHomeClick: () -> Unit) {
     Card(

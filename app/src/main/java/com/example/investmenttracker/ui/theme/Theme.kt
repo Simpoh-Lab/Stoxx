@@ -33,6 +33,7 @@ private val LightColorScheme = lightColorScheme(
     */
 )
 
+// Sets up the custom Material 3 theme and typography for the Investment Tracker application.
 @Composable
 fun InvestmentTrackerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),

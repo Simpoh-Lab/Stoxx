@@ -50,6 +50,8 @@ data class LiveNewsItem(
 data class TransactionItem(
     val id: String,
     val date: String,
+    val time: String = "",
+    val symbol: String = "",
     val description: String,
     val amount: String,
     val isDebit: Boolean,
